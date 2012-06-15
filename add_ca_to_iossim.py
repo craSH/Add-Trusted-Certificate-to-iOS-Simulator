@@ -34,18 +34,36 @@ truststore_path = "/Library/Keychains/TrustStore.sqlite3"
 
 
 def cert_fingerprint_via_openssl(cert_location):
-	output = subprocess.check_output(["openssl", "x509", "-noout", "-in", cert_location, "-fingerprint"])
-	fingerprint_with_colons = output.split("=")[1]
-	return fingerprint_with_colons.replace(':','')
+    output = None
+    try:
+        output = subprocess.check_output(["openssl", "x509", "-inform", "pem", "-noout", "-in", cert_location, "-fingerprint"])
+    except Exception:
+        output = subprocess.check_output(["openssl", "x509", "-inform", "der", "-noout", "-in", cert_location, "-fingerprint"])
+    except Exception:
+        output = subprocess.check_output(["openssl", "x509", "-inform", "net", "-noout", "-in", cert_location, "-fingerprint"])
+    fingerprint_with_colons = output.split("=")[1]
+    return fingerprint_with_colons.replace(':','')
 
 
 def cert_fingerprint(cert_location):
-	try:
-		from M2Crypto import X509	
-		cert = X509.load_cert(cert_location)
-		return cert.get_fingerprint('sha1')
-	except ImportError:
-		return cert_fingerprint_via_openssl(cert_location)	
+    try:
+        from M2Crypto import X509
+    except ImportError as ex:
+        pass
+
+    # If M2Crypto loaded, use it
+    if 'X509' in dir():
+        try:
+            cert = X509.load_cert(cert_location, format=X509.FORMAT_PEM)
+            return cert.get_fingerprint('sha1')
+        except X509.X509Error:
+            cert = X509.load_cert(cert_location, format=X509.FORMAT_DER)
+            return cert.get_fingerprint('sha1')
+        except Exception as ex:
+            print("Error loading certificate fingerprint via M2Crypto or OpenSSL")
+    # No M2Crypto, try with OpenSSL
+    else:
+        return cert_fingerprint_via_openssl(cert_location)
 
 
 def add_to_truststore(sdk_dir, cert_fingerprint):
@@ -62,7 +80,7 @@ def add_to_truststore(sdk_dir, cert_fingerprint):
 
 		c.close()
 		conn.close()
-		print("Successfully added CA to %s" % tpath) 
+		print("Successfully added CA to %s" % tpath)
 	except sqlite3.OperationalError:
 		print("Error adding CA to %s" % tpath )
 		print("Mostly likely failed because Truststore does not exist..skipping\n")
